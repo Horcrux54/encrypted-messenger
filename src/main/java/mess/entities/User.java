@@ -4,15 +4,14 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
-import javax.persistence.Entity;
-import javax.persistence.Id;
-import javax.persistence.Table;
+import javax.persistence.*;
 
 @Entity
 @Table(name = "user_table")
 @JsonPropertyOrder({ "access", "refresh" })
 public class User {
     @JsonIgnore
+    @Column(name = "username")
     private Long id;
     @JsonIgnore
     private String username;
@@ -22,6 +21,15 @@ public class User {
     private String refresh;
     @JsonIgnore
     private String password;
+    private String key;
+
+    public String getKey() {
+        return key;
+    }
+
+    public void setKey(String key) {
+        this.key = key;
+    }
 
     public String getPassword() {
         return password;

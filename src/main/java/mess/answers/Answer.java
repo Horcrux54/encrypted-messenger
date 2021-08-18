@@ -1,13 +1,10 @@
 package mess.answers;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import mess.entities.User;
-//Ответ от сервера с токенами
-public class AnswerGetToken {
+
+public class Answer {
     @JsonProperty("error")
     public boolean error;
     @JsonProperty("message")
     public String message;
-    @JsonProperty("token")
-    public User user;
 }
