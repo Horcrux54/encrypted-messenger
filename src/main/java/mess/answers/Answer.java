@@ -7,4 +7,9 @@ public class Answer {
     public boolean error;
     @JsonProperty("message")
     public String message;
+
+    public Answer(boolean error, String message) {
+        this.error = error;
+        this.message = message;
+    }
 }

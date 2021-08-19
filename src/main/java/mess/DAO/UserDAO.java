@@ -14,7 +14,6 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
@@ -75,11 +74,9 @@ public class UserDAO {
                 return new ObjectMapper().writeValueAsString(answerGetToken);
             }
         }
+
         //создание ошибочного ответа
-        Answer answer = new Answer();
-        answer.error = true;
-        answer.message = "Неправильно введен username или password";
-        return new ObjectMapper().writeValueAsString(answer);
+        return new ObjectMapper().writeValueAsString(new Answer(true, "Неправильно введен username или password"));
     }
 
     //генерация рефреш токена
@@ -91,25 +88,32 @@ public class UserDAO {
     }
     //геренация аксес токена
     public String generateAccessToken(User user) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+
         //создание заголовка токена(он всегда один)
         String header = baseEncoding("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+
         //создание полезные данные
         PayloadAccess payloadAccess = new PayloadAccess();
+
         //устанавливаем username
         payloadAccess.setUsername(user.getUsername());
+
         //устанавливаем время жизни токена
         payloadAccess.setExp(String.valueOf(new Date().getTime()/1000/60 + 10));
         String payout = baseEncoding(new ObjectMapper().writeValueAsString(payloadAccess));
+
         //конкатенируем заголовок и полезные данные
         String concatHeaderPayout = header.concat(".").concat(payout);
-        //создаем подпись. Строка с заголовком и полезными данными кодируется и переводится в Base64
+
+        //Создаем подпись. Строка с заголовком и полезными данными кодируется и переводится в Base64
         String signature = baseEncoding(generateHash(concatHeaderPayout));
+
         //отправка токена
         return concatHeaderPayout.concat(".").concat(signature);
     }
 
     //проверка рефреш токена и генерация новых токенов
-    public String generateTokens(String refresh) throws JsonProcessingException, UnsupportedEncodingException, NoSuchAlgorithmException, InvalidKeyException {
+    public String generateTokens(String refresh) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
         Optional<User> optionalUser = userRepository.findByRefresh(refresh);
         //если существует пользователь с таким рефреш токеном
         if(optionalUser.isPresent()){
@@ -127,47 +131,49 @@ public class UserDAO {
             answerGetToken.user = user;
             return new ObjectMapper().writeValueAsString(answerGetToken);
         }
+
         //создание ответа при неправильном рефреш токине
-        Answer answer = new Answer();
-        answer.error = true;
-        answer.message = "Неправильный рефреш токен";
-        return new ObjectMapper().writeValueAsString(answer);
+        return new ObjectMapper().writeValueAsString(new Answer(true, "Неправильный рефреш токен"));
     }
 
     //Проверка подписи
     private boolean signatureVerification(String[] accessToken) throws NoSuchAlgorithmException, InvalidKeyException {
-        if(baseEncoding(generateHash(accessToken[0].concat(".").concat(accessToken[1]))).equals(accessToken[2])) return true;
-        else return false;
+        return baseEncoding(generateHash(accessToken[0].concat(".").concat(accessToken[1]))).equals(accessToken[2]);
     }
 
+    //Проверка полей и отправка сообщений
     public String sendMessage(String recipientUsername, String access, String message) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+
+        //разбиение на header payload signature
         String[] strings = access.split("\\.");
+
+        //если разбиение произошло неудачно
         if (strings.length != 3) {
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Неправильный токен";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Неправильный токен"));
         }
+
+        //если access токен неверный(проверка подписи)
         if(!signatureVerification(strings)){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Ваш аксес токен не верный. Сгенерируйте новый";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Ваш аксес токен не верный. Сгенерируйте новый"));
         }
+
+        //получение времени в минутах
         long date = new Date().getTime()/1000/60;
+
+        //конвертация payload в json
         Map<String,String> testToJson = new ObjectMapper().readValue(baseDecode(strings[1]), Map.class);
+
+        //если access токен устарел
         if(Long.parseLong(testToJson.get("exp")) < date){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Ваш аксес токен устарел. Сгенерируйте новый";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Ваш аксес токен устарел. Сгенерируйте новый"));
         }
+
+        //если получателя не существует
         if(!userRepository.existsByUsername(recipientUsername)){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Такой пользователь не существует";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Такой пользователь не существует"));
         }
+
+        //Формирование объекта и сохранение его в таблицу
         Message newMessage = new Message();
         newMessage.setId(messageRepository.count()+1);
         newMessage.setTime(date);
@@ -175,19 +181,17 @@ public class UserDAO {
         newMessage.setRecipient(recipientUsername);
         newMessage.setMess(message);
         messageRepository.save(newMessage);
-        Answer answer = new Answer();
-        answer.error = false;
-        answer.message = "Ваше сообщение было доставлено";
-        return new ObjectMapper().writeValueAsString(answer);
+        return new ObjectMapper().writeValueAsString(new Answer(false, "Ваше сообщение было доставлено"));
     }
 
+    //создание нового пользователя
     public String createUser(String username, String password) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+
+        //если пользователь с таким username существует
         if(userRepository.existsByUsername(username)){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Пользователь с таким username уже существует";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Пользователь с таким username уже существует"));
         }
+
         User newUser = new User();
         newUser.setId(userRepository.count()+1);
         newUser.setUsername(username);
@@ -196,6 +200,8 @@ public class UserDAO {
         newUser.setAccess(generateAccessToken(newUser));
         newUser.setKey("pass");
         userRepository.save(newUser);
+
+        //формирование ответа
         AnswerGetToken answerGetToken = new AnswerGetToken();
         answerGetToken.user = newUser;
         answerGetToken.message = "success";

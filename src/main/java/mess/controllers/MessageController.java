@@ -4,9 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import mess.DAO.UserDAO;
 import mess.answers.Answer;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 
@@ -22,10 +23,7 @@ public class MessageController {
     public String newUser(@RequestHeader(value = "username", required = false, defaultValue = "null")String username,
                           @RequestHeader(value = "password", required = false, defaultValue = "null")String password) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
         if(username.equals("null") || password.equals("null")){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Введите в заголовок запроса username и password";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Введите в заголовок запроса username и password"));
         }
         return userDAO.createUser(username, password);
     }
@@ -33,16 +31,16 @@ public class MessageController {
     @PostMapping({"/login/*", "/login"})
     public String base(@RequestHeader(value = "username", required = false, defaultValue = "null")String username,
                        @RequestHeader(value = "password", required = false, defaultValue = "null")String password,
-                       @RequestHeader(value = "refresh", required = false, defaultValue = "null")String refresh) throws JsonProcessingException, UnsupportedEncodingException, NoSuchAlgorithmException, InvalidKeyException {
+                       @RequestHeader(value = "refresh", required = false, defaultValue = "null")String refresh) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+
         //сначала проверка идет по наличию заголовков имени и пароля, если все ок возврат токенов
         if(!username.equals("null") && !password.equals("null")) return userDAO.gettingToken(username, password);
+
         //проверка наличия в щаголовке запроса рефреш токена, если всё ок вернёт новые токены
         if(!refresh.equals("null")) return userDAO.generateTokens(refresh);
+
         //создание и отправка ошибочного ответа сервера
-        Answer answer = new Answer();
-        answer.error = true;
-        answer.message = "Введите в заголовок запроса username и password или используйте рефреш токен";
-        return new ObjectMapper().writeValueAsString(answer);
+        return new ObjectMapper().writeValueAsString(new Answer(true, "Введите в заголовок запроса username и password или используйте рефреш токен"));
 
     }
     //Отправка сообщения
@@ -50,24 +48,23 @@ public class MessageController {
     public String sendMessage(@RequestHeader(value = "recipient", required = false, defaultValue = "null")String recipient,
                               @RequestHeader(value = "accessToken", required = false, defaultValue = "null")String access,
                               @RequestHeader(value = "message", required = false,defaultValue = "")String message) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+
+        //если не указан получатель
         if(recipient.equals("null")){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Введите в заголовке username отправителя";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Введите в заголовке username отправителя"));
         }
+
+        //если не указан access токен
         if(access.equals("null")){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Введите в заголовке свой access токен";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true, "Введите в заголовке свой access токен"));
         }
+
+        //если поле сообщение пустое
         if(message.equals("")){
-            Answer answer = new Answer();
-            answer.error = true;
-            answer.message = "Введите в заголовок своё сообщение";
-            return new ObjectMapper().writeValueAsString(answer);
+            return new ObjectMapper().writeValueAsString(new Answer(true,"Введите в заголовок своё сообщение"));
         }
+
+        //если все заголовки указаны
         return userDAO.sendMessage(recipient, access, message);
     }
 }
