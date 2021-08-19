@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import mess.answers.Answer;
 import mess.answers.AnswerGetToken;
 import mess.answers.PayloadAccess;
+import mess.entities.Message;
 import mess.entities.User;
+import mess.repositories.MessageRepository;
 import mess.repositories.UserRepository;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
@@ -13,20 +15,21 @@ import org.springframework.stereotype.Component;
 import javax.crypto.*;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 @Component
 public class UserDAO {
-    private Environment env;
-    private UserRepository userRepository;
+    private final Environment environment;
+    private final UserRepository userRepository;
+    private final MessageRepository messageRepository;
 
-    public UserDAO(Environment env, UserRepository userRepository) {
-        this.env = env;
+    public UserDAO(Environment environment, UserRepository userRepository, MessageRepository messageRepository) {
+        this.environment = environment;
         this.userRepository = userRepository;
+        this.messageRepository = messageRepository;
     }
 
     //Кодирование Base64
@@ -39,14 +42,15 @@ public class UserDAO {
         return new String(Base64.getDecoder().decode(string));
     }
     //создание подписи
-    private String generateHash(String string) throws NoSuchAlgorithmException, InvalidKeyException, UnsupportedEncodingException {
+    private String generateHash(String string) throws NoSuchAlgorithmException, InvalidKeyException {
         //получение секретного ключа с файла пропертис
-        String key = env.getProperty("message.usertable.password");
+        String key = environment.getProperty("message.userTable.password");
         //установка алгоритма шифрования
         Mac sha256_HMAC = Mac.getInstance("HmacSHA256");
+        assert key != null;
         sha256_HMAC.init(new SecretKeySpec(key.getBytes(), "HmacSHA256"));
         //шифрование
-        byte[] bytes = sha256_HMAC.doFinal(string.getBytes("UTF-8"));
+        byte[] bytes = sha256_HMAC.doFinal(string.getBytes(StandardCharsets.UTF_8));
         StringBuilder result = new StringBuilder();
         //конвертирование в строку
         for (final byte element : bytes)
@@ -86,7 +90,7 @@ public class UserDAO {
         return uuid1.concat(uuid2).concat(uuid3).replace("-","");
     }
     //геренация аксес токена
-    public String generateAccessToken(User user) throws JsonProcessingException, UnsupportedEncodingException, NoSuchAlgorithmException, InvalidKeyException {
+    public String generateAccessToken(User user) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
         //создание заголовка токена(он всегда один)
         String header = baseEncoding("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
         //создание полезные данные
@@ -94,7 +98,7 @@ public class UserDAO {
         //устанавливаем username
         payloadAccess.setUsername(user.getUsername());
         //устанавливаем время жизни токена
-        payloadAccess.setExp(String.valueOf(new Date().getTime() + 600000));
+        payloadAccess.setExp(String.valueOf(new Date().getTime()/1000/60 + 10));
         String payout = baseEncoding(new ObjectMapper().writeValueAsString(payloadAccess));
         //конкатенируем заголовок и полезные данные
         String concatHeaderPayout = header.concat(".").concat(payout);
@@ -130,7 +134,13 @@ public class UserDAO {
         return new ObjectMapper().writeValueAsString(answer);
     }
 
-    public String sendMessage(String recipientUsername, String access) throws JsonProcessingException, NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeyException, IllegalBlockSizeException, BadPaddingException {
+    //Проверка подписи
+    private boolean signatureVerification(String[] accessToken) throws NoSuchAlgorithmException, InvalidKeyException {
+        if(baseEncoding(generateHash(accessToken[0].concat(".").concat(accessToken[1]))).equals(accessToken[2])) return true;
+        else return false;
+    }
+
+    public String sendMessage(String recipientUsername, String access, String message) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
         String[] strings = access.split("\\.");
         if (strings.length != 3) {
             Answer answer = new Answer();
@@ -138,7 +148,13 @@ public class UserDAO {
             answer.message = "Неправильный токен";
             return new ObjectMapper().writeValueAsString(answer);
         }
-        long date = new Date().getTime();
+        if(!signatureVerification(strings)){
+            Answer answer = new Answer();
+            answer.error = true;
+            answer.message = "Ваш аксес токен не верный. Сгенерируйте новый";
+            return new ObjectMapper().writeValueAsString(answer);
+        }
+        long date = new Date().getTime()/1000/60;
         Map<String,String> testToJson = new ObjectMapper().readValue(baseDecode(strings[1]), Map.class);
         if(Long.parseLong(testToJson.get("exp")) < date){
             Answer answer = new Answer();
@@ -146,38 +162,39 @@ public class UserDAO {
             answer.message = "Ваш аксес токен устарел. Сгенерируйте новый";
             return new ObjectMapper().writeValueAsString(answer);
         }
-        return null;
+        if(!userRepository.existsByUsername(recipientUsername)){
+            Answer answer = new Answer();
+            answer.error = true;
+            answer.message = "Такой пользователь не существует";
+            return new ObjectMapper().writeValueAsString(answer);
+        }
+        Message newMessage = new Message();
+        newMessage.setId(messageRepository.count()+1);
+        newMessage.setTime(date);
+        newMessage.setSender(testToJson.get("username"));
+        newMessage.setRecipient(recipientUsername);
+        newMessage.setMess(message);
+        messageRepository.save(newMessage);
+        Answer answer = new Answer();
+        answer.error = false;
+        answer.message = "Ваше сообщение было доставлено";
+        return new ObjectMapper().writeValueAsString(answer);
     }
 
-    //генерация открытого и закрытого ключа
-    public String generateKeys() throws NoSuchAlgorithmException {
-        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-        generator.initialize(1024);
-        KeyPair keyPair = generator.generateKeyPair();
-        return keyPair.getPublic().toString();
-        /*Cipher cipher = Cipher.getInstance("RSA");
-        cipher.init(Cipher.ENCRYPT_MODE, keyPair.getPublic());
-        byte[] data = cipher.doFinal("Hello!".getBytes());
-        // Decrypt with PUBLIC KEY
-        cipher.init(Cipher.DECRYPT_MODE, keyPair.getPrivate());
-        byte[] result = cipher.doFinal(data);
-        System.out.println(new String(result));*/
-    }
-
-    public String createUser(String username, String password) throws JsonProcessingException, UnsupportedEncodingException, NoSuchAlgorithmException, InvalidKeyException {
-        Optional<User> existingUser = userRepository.findByUsername(username);
-        if(existingUser.isPresent()){
+    public String createUser(String username, String password) throws JsonProcessingException, NoSuchAlgorithmException, InvalidKeyException {
+        if(userRepository.existsByUsername(username)){
             Answer answer = new Answer();
             answer.error = true;
             answer.message = "Пользователь с таким username уже существует";
             return new ObjectMapper().writeValueAsString(answer);
         }
         User newUser = new User();
+        newUser.setId(userRepository.count()+1);
         newUser.setUsername(username);
         newUser.setPassword(password);
         newUser.setRefresh(generateRefreshToken());
         newUser.setAccess(generateAccessToken(newUser));
-        newUser.setKey(generateKeys());
+        newUser.setKey("pass");
         userRepository.save(newUser);
         AnswerGetToken answerGetToken = new AnswerGetToken();
         answerGetToken.user = newUser;
@@ -185,35 +202,4 @@ public class UserDAO {
         answerGetToken.error = false;
         return new ObjectMapper().writeValueAsString(answerGetToken);
     }
-        /*if(strings[1])
-        Optional<User> recipient = userRepository.findByUsername(recipientUsername);
-    }*/
-    /*
-    public String generateKey() {
-        long exp;
-        int p = (int) (20 + Math.random()*40);
-        int q = (int) (10 + Math.random()*30);
-        long m = p * q;
-        long fi = (long) (p - 1) *(q-1);
-        long index = 3;
-        while(true){
-            if(fi%index!=0){
-                exp = index;
-                break;
-            }
-            index++;
-            if(index > 10) return "null";
-        }
-        long d;
-        index = 1;
-        while(true){
-            if(((index * exp) % fi) == 1){
-                d = index;
-                break;
-            }
-            index++;
-            if(index > 100000) return "null";
-        }
-        return exp + " " + m + " " + d;
-    }*/
 }

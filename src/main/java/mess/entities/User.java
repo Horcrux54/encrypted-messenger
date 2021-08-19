@@ -11,7 +11,7 @@ import javax.persistence.*;
 @JsonPropertyOrder({ "access", "refresh" })
 public class User {
     @JsonIgnore
-    @Column(name = "username")
+    @Id
     private Long id;
     @JsonIgnore
     private String username;
